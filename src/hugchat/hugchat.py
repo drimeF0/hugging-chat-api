@@ -678,8 +678,8 @@ class ChatBot:
             "inputs": text,
             "is_continue": False,
             "is_retry": is_retry,
-            "web_search": web_search,
-            "tools": {}
+            "web_search": False,
+            "tools": {"websearch":true,"fetch_url":true,"document_parser":true,"query_calculator":true}
         }
         headers = {
             'authority': 'huggingface.co',
