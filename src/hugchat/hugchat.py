@@ -13,7 +13,6 @@ from requests.sessions import RequestsCookieJar
 
 from .message import Message
 from . import exceptions
-from .types.assistant import Assistant
 from .types.model import Model
 from .types.message import MessageNode, Conversation
 
