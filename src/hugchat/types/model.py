@@ -19,7 +19,6 @@ class Model:
         logoUrl: str = None,
         reasoning: bool = None,
         multimodal: bool = None,
-        tools: bool = None,
         hasInferenceAPI: bool = None,
     ):
         """
@@ -44,7 +43,6 @@ class Model:
         self.logoUrl: str = logoUrl
         self.reasoning: bool = reasoning
         self.multimodal: bool = multimodal
-        self.tools: bool = tools
         self.hasInferenceAPI: bool = hasInferenceAPI
 
     def __str__(self) -> str:

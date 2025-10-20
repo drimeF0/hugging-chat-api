@@ -10,10 +10,10 @@ import json
 class ResponseTypes:
     FINAL = "finalAnswer"
     STREAM = "stream"
-    TOOL = "tool"
-    FILE = "file"
-    WEB = "webSearch"
     STATUS = "status"
+    METADATA = "routerMetadata"
+    TITLE = "title"
+
 
 
 class MessageStatus:
@@ -25,26 +25,13 @@ class MessageStatus:
 MSGTYPE_ERROR = "error"
 
 
-class WebSearchSource:
-    title: str
-    link: str
-
-    def __str__(self):
-        return json.dumps({
-            "title": self.title,
-            "link": self.link,
-        })
-
 
 class Message(Generator):
     """
     :Args:
         * g: Generator
         * _stream_yield_all: bool = False
-        * web_search: bool = False
-        - web_search_sources: list[WebSearchSource] = list()
         - text: str = ""
-        - web_search_done: bool = not web_search
         - msg_status: int = MessageStatus.PENDING
         - error: Union[Exception, None] = None
 
@@ -71,26 +58,17 @@ class Message(Generator):
 
     gen: Generator
 
-    web_search: bool = False
-    web_search_sources: List[WebSearchSource] = []
-    web_search_done: bool = not web_search
-
-    tools_used: List[Tool] = []
-    files_created: List[File] = []
-
     msg_status: int = MessageStatus.PENDING
     error: Union[Exception, None] = None
 
     def __init__(
         self,
         g: Generator,
-        _stream_yield_all: bool = False,
-        web_search: bool = False,
+        _stream_yield_all: bool = True,
         conversation: Conversation = None
     ) -> None:
         self.gen = g
         self._stream_yield_all = _stream_yield_all
-        self.web_search = web_search
         self.conversation = conversation
 
     @property
@@ -129,30 +107,6 @@ class Message(Generator):
             if data_type == ResponseTypes.FINAL:
                 # self._result_text = data["text"]
                 self.msg_status = MessageStatus.RESOLVED
-
-            # Handle web response type
-            elif data_type == ResponseTypes.WEB:
-                # gracefully pass unparseable webpages
-                if message_type != MSGTYPE_ERROR and data.__contains__("sources"):
-                    self.web_search_sources.clear()
-                    sources = data["sources"]
-                    for source in sources:
-                        wss = WebSearchSource()
-                        wss.title = source["title"]
-                        wss.link = source["link"]
-                        self.web_search_sources.append(wss)
-
-            # Handle what is done when a tool completes
-            elif data_type == ResponseTypes.TOOL:
-                if data["subtype"] == "result":
-                    tool = Tool(data["uuid"], data["result"])
-                    self.tools_used.append(tool)
-
-            # Handle what is done when a file is created
-            elif data_type == ResponseTypes.FILE:
-                file = File(data["sha"], data["name"], data["mime"], self.conversation)
-                self.files_created.append(file)
-
             # replace null characters with an empty string
             elif data_type == ResponseTypes.STREAM:
                 data["token"] = data["token"].replace('\u0000', '')
@@ -163,13 +117,6 @@ class Message(Generator):
                 if message_type == MSGTYPE_ERROR:
                     self.error = ChatError(data["message"])
                     self.msg_status = MessageStatus.REJECTED
-
-                if data_type == ResponseTypes.STREAM:
-                    self.web_search_done = True
-
-                elif data_type == ResponseTypes.STATUS:
-                    pass
-
             else:
                 if "Model is overloaded" in str(data):
                     self.error = ModelOverloadedError(
@@ -195,7 +142,6 @@ class Message(Generator):
                 raise self.error
             pass
         except Exception as e:
-            # print("meet error: ", str(e))
             self.error = e
             self.msg_status = MessageStatus.REJECTED
             raise self.error
@@ -220,34 +166,6 @@ class Message(Generator):
             - self.text
         """
         return self.text
-
-    def get_search_sources(self) -> list:
-        """
-        :Return:
-            - self.web_search_sources
-        """
-        return self.web_search_sources
-
-    def get_tools_used(self) -> list:
-        """
-        :Return:
-            - self.tools_used
-        """
-        return self.tools_used
-
-    def get_files_created(self) -> list:
-        """
-        :Return:
-            - self.files_created
-        """
-        return self.files_created
-
-    def search_enabled(self) -> bool:
-        """
-        :Return:
-            - self.web_search
-        """
-        return self.web_search
 
     def wait_until_done(self) -> str:
         """
@@ -280,30 +198,13 @@ class Message(Generator):
         """
         return self.msg_status
 
-    def is_done_search(self):
-        """
-        :Return:
-            - self.web_search_done
-
-        web search result will be set to `done` once the token is received
-        """
-        return self.web_search_done
-
     def __str__(self):
         return self.wait_until_done()
 
     def __getitem__(self, key: str) -> str:
-        print("_getitem_")
         self.wait_until_done()
-
         if key == "text":
             return self.text
-
-        elif key == "web_search":
-            return self.web_search
-
-        elif key == "web_search_sources":
-            return self.web_search_sources
 
     def __add__(self, other: str) -> str:
         self.wait_until_done()

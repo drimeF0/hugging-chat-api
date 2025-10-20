@@ -31,8 +31,7 @@ class ChatBot:
 
     def __init__(
         self,
-        cookies: Union[dict, None, RequestsCookieJar] = None,
-        cookie_path: str = "",
+        cookies: Union[dict, RequestsCookieJar] = None,
         default_llm: Union[int, str] = 0,
         system_prompt: str = "",
     ) -> None:
@@ -40,27 +39,10 @@ class ChatBot:
         Returns a ChatBot object
         default_llm: name or index
         """
-        if cookies is None and cookie_path == "":
+        if cookies is None"":
             raise exceptions.ChatBotInitError(
                 "Authentication is required now, but no cookies provided. See tutorial at https://github.com/Soulter/hugging-chat-api"
             )
-        elif cookies is not None and cookie_path != "":
-            raise exceptions.ChatBotInitError(
-                "Both cookies and cookie_path provided")
-
-        if cookies is None and cookie_path != "":
-            # read cookies from path
-            if not os.path.exists(cookie_path):
-                raise exceptions.ChatBotInitError(
-                    f"Cookie file {cookie_path} not found. Note: The file must be in JSON format and must contain a list of cookies. See more at https://github.com/Soulter/hugging-chat-api"
-                )
-            with open(cookie_path, "r", encoding="utf-8") as f:
-                cookies = json.load(f)
-
-        # convert cookies to KV format
-        if isinstance(cookies, list):
-            cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
-
         self.cookies = cookies
 
         self.hf_base_url = "https://huggingface.co"
@@ -132,48 +114,22 @@ class ChatBot:
     def get_active_llm_index(self) -> int:
         return self.llms.index(self.active_model)
 
-    def accept_ethics_modal(self):
-        """
-        [Deprecated Method]
-        """
-        response = self.session.post(
-            self.hf_base_url + "/chat/settings",
-            headers=self.get_headers(ref=False),
-            cookies=self.get_cookies(),
-            allow_redirects=True,
-            data={
-                "ethicsModalAccepted": "true",
-                "shareConversationsWithModelAuthors": "true",
-                "ethicsModalAcceptedAt": "",
-                "activeModel": str(self.active_model),
-            },
-        )
-
-        if response.status_code != 200:
-            raise Exception(
-                f"Failed to accept ethics modal with status code: {response.status_code}. {response.content.decode()}"
-            )
-
-        return True
 
     def new_conversation(
         self,
         modelIndex: int = None,
         system_prompt: str = "",
-        switch_to: bool = False,
-        assistant: Union[str, Assistant] = None,
+        switch_to: bool = True,
     ) -> Conversation:
         """
         Create a new conversation. Return a conversation object. 
 
         modelIndex: int, get it from get_available_llm_models(). If None, use the default model.
-        assistant: str or Assistant, the assistant **id**. Assistant id can be found in the assistant url, such as https://huggingface.co/chat/assistant/65bf2ddbf4017c8048ae43a3, the id is `65bf2ddbf4017c8048ae43a3`.
 
         - You should change the conversation by calling change_conversation() after calling this method. Or set param switch_to to True.
         - if you use assistant, the parameter `system_prompt` will be ignored.
 
         """
-        err_count = 0
 
         if modelIndex is None:
             model = self.active_model
@@ -182,69 +138,39 @@ class ChatBot:
                 raise IndexError("Out of range of llm index")
 
             model = self.llms[modelIndex]
-
-        # Accept the welcome modal when init.
-        # 17/5/2023: This is not required anymore.
-        # if not self.accepted_welcome_modal:
-        #     self.accept_ethics_modal()
-
         # Create new conversation and get a conversation id.
 
         _header = self.get_headers(ref=False)
-        _header["Referer"] = "https://huggingface.co/chat"
+        _header["Referer"] = "https://huggingface.co/chat/"
 
         request = {
             "model": model.id,
+            "preprompt": system_prompt if system_prompt != "" else model.preprompt
         }
 
-        # get assistant id
-        if assistant is not None:
-            assistant_id = None
-            if isinstance(assistant, str):
-                assistant_id = assistant
-            elif isinstance(assistant, Assistant):
-                assistant_id = assistant.assistant_id
-            else:
-                raise ValueError(
-                    "param assistant must be a string or Assistant object.")
-            request["assistantId"] = assistant_id
-        else:
-            request["preprompt"] = system_prompt if system_prompt != "" else model.preprompt
 
-        while True:
-            try:
-                resp = self.session.post(
-                    self.hf_base_url + "/chat/conversation",
-                    json=request,
-                    headers=_header,
-                    cookies=self.get_cookies(),
-                )
+        resp = self.session.post(
+            self.hf_base_url + "/chat/conversation",
+            json=request,
+            headers=_header,
+            cookies=self.get_cookies(),
+        )
 
-                logging.debug(resp.text)
-                cid = json.loads(resp.text)["conversationId"]
+        logging.debug(resp.text)
+        cid = json.loads(resp.text)["conversationId"]
 
-                c = Conversation(
-                    id=cid, system_prompt=system_prompt, model=model)
+        c = Conversation(id=cid, system_prompt=system_prompt, model=model)
 
-                self.conversation_list.append(c)
-                if switch_to:
-                    self.change_conversation(c)
+        self.conversation_list.append(c)
 
-                # we need know the root message id (a.k.a system prompt message id).
-                self.get_conversation_info(c)
+        if switch_to:
+            self.change_conversation(c)
 
-                return c
+        # we need know the root message id (a.k.a system prompt message id).
+        self.get_conversation_info(c)
 
-            except BaseException as e:
-                err_count += 1
-                logging.debug(
-                    f" Failed to create new conversation ({e}). Retrying... ({err_count})"
-                )
-                if err_count > 5:
-                    raise exceptions.CreateConversationError(
-                        f"Failed to create new conversation with status code: {resp.status_code}. Error: {e}. Retries: {err_count}."
-                    )
-                continue
+        return c
+
 
     def change_conversation(self, conversation_object: Conversation):
         """
@@ -265,32 +191,6 @@ class ChatBot:
         
         return self.current_conversation
 
-    def share_conversation(self, conversation_object: Conversation = None) -> str:
-        """
-        Return a share link of the conversation.
-        """
-        if conversation_object is None:
-            conversation_object = self.current_conversation
-
-        headers = self.get_headers()
-
-        r = self.session.post(
-            f"{self.hf_base_url}/chat/conversation/{conversation_object}/share",
-            headers=headers,
-            cookies=self.get_cookies(),
-        )
-
-        if r.status_code != 200:
-            raise Exception(
-                f"Failed to share conversation with status code: {r.status_code}"
-            )
-
-        response = r.json()
-        if "url" in response:
-            return response["url"]
-
-        raise Exception(f"Unknown server response: {response}")
-
     def delete_all_conversations(self) -> None:
         """
         Deletes ALL conversations on the HuggingFace account
@@ -299,8 +199,8 @@ class ChatBot:
         settings = {"": ("", "")}
 
         r = self.session.delete(
-            f"{self.hf_base_url}/chat/api/conversations/",
-            headers={"Referer": "https://huggingface.co/chat", "Origin": "https://huggingface.co", "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundarywrIEW0Ame78HYisT"},
+            f"{self.hf_base_url}/chat/api/v2/conversations/",
+            headers={"Referer": "https://huggingface.co/chat/settings/application", "Origin": "https://huggingface.co", "Content-Type": "application/json"},
             cookies=self.get_cookies(),
             allow_redirects=True,
             files=settings,
@@ -325,7 +225,7 @@ class ChatBot:
         headers = self.get_headers()
 
         r = self.session.delete(
-            f"{self.hf_base_url}/chat/conversation/{conversation_object}",
+            f"{self.hf_base_url}/chat/api/v2/conversations/{conversation_object}",
             headers=headers,
             cookies=self.get_cookies(),
         )
@@ -348,26 +248,6 @@ class ChatBot:
         Get all available models that are available in huggingface.co/chat.
         """
         return self.llms
-
-    def set_share_conversations(self, val: bool = True):
-        """
-        Sets the "Share Conversation with Model Authors setting" to the given val variable
-        """
-        settings = {"shareConversationsWithModelAuthors": (
-            "", "on" if val else "")}
-
-        r = self.session.post(
-            self.hf_base_url + "/chat/settings",
-            headers={"Referer": "https://huggingface.co/chat", "Origin":"https://huggingface.co"},
-            cookies=self.get_cookies(),
-            allow_redirects=True,
-            files=settings,
-        )
-
-        if r.status_code != 200:
-            raise Exception(
-                f"Failed to set share conversation with status code: {r.status_code}"
-            )
 
     def switch_llm(self, index: int) -> bool:
         """
@@ -437,7 +317,6 @@ class ChatBot:
                 logoUrl=model_data_dict.get("logoUrl"),
                 reasoning=model_data_dict.get("reasoning"),
                 multimodal=model_data_dict.get("multimodal"),
-                tools=model_data_dict.get("tools"),
                 hasInferenceAPI=model_data_dict.get("hasInferenceAPI")
             )
 
@@ -462,8 +341,8 @@ class ChatBot:
         Returns all the remote conversations for the active account. Returns the conversations in a list.
         """
 
-        r = self.session.post(
-            self.hf_base_url + "/chat/__data.json",
+        r = self.session.get(
+            self.hf_base_url + "/chat/api/v2/conversations?p=0",
             headers=self.get_headers(ref=False),
             cookies=self.get_cookies(),
         )
@@ -474,16 +353,11 @@ class ChatBot:
             )
             
         # temporary workaround for #267
-        line_ = r.text.splitlines()[0]
-        data = json.loads(line_)["nodes"][0]["data"]
+        data = r.json()["json"] 
 
-        conversationIndices = data[data[0]["conversations"]]
+        conversations = data[0]["conversations"]
 
-        conversations = []
-
-        for index in conversationIndices:
-            conversation_data = data[index]
-
+        for conversation_data in conversations:
             c = Conversation(
                 id=data[conversation_data["id"]],
                 title=data[conversation_data["title"]],
@@ -586,80 +460,16 @@ class ChatBot:
                     return i
                 return conversation
 
-    def _parse_assistants(self, nodes_data: list) -> List[Assistant]:
-        '''
-        parse the assistants data from the response.
-        '''
-        index = nodes_data[1]
-        ret = []
-        for i in index:
-            attribute_map: dict = nodes_data[i]
-            assistant_id = nodes_data[attribute_map['_id']]
-            author = nodes_data[attribute_map['createdByName']]
-            name = nodes_data[attribute_map['name']].strip()
-            model_name = nodes_data[attribute_map['modelId']]
-            pre_prompt = nodes_data[attribute_map['preprompt']]
-            description = nodes_data[attribute_map['description']]
-            ret.append(Assistant(
-                assistant_id,
-                author,
-                name,
-                model_name,
-                pre_prompt,
-                description
-            ))
-        return ret
-
-    def get_assistant_list_by_page(self, page: int) -> List[Assistant]:
-        '''
-        get assistant list by page number.
-        if page < 0 or page > max_page then return `None`.
-        '''
-        url = f"https://huggingface.co/chat/assistants/__data.json?p={page}&x-sveltekit-invalidated=01"
-        res = self.session.get(url, timeout=10)
-        res = res.json()
-        if res['nodes'][1]['type'] == 'error':
-            return None
-        # here we parse the result
-        return self._parse_assistants(res['nodes'][1]['data'])
-    
-    def search_assistant(self, assistant_name: str = None, assistant_id: str = None) -> Assistant:
-        '''
-        [DEPRECATED]
-        - If you created an assistant by your own, you should pass the assistant_id here but not the assistant_name. You can pass your assistant_id into the new_conversation() directly.
-        - Search an available assistant by assistant name or assistant id.
-        - Will search on api.soulter.top/hugchat because offifial api doesn't support search.
-        - Return the `Assistant` object if found, return None if not found.
-        '''
-        if not assistant_name and not assistant_id:
-            raise ValueError(
-                "assistant_name and assistant_id can not be both None.")
-        if assistant_name:
-            url = f"https://api.soulter.top/hugchat/assistant?name={assistant_name}"
-        else:
-            url = f"https://api.soulter.top/hugchat/assistant?id={assistant_id}"
-        res = requests.get(url, timeout=10)
-        if res.status_code != 200:
-            raise Exception(
-                f"Failed to search assistant with status code: {res.status_code}, please commit an issue to https://github.com/Soulter/hugging-chat-api/issues")
-        res = res.json()
-        if not res['data']:
-            # empty dict
-            return None
-        if res['code'] != 0:
-            raise Exception(
-                f"Failed to search assistant with server's error: {res['message']}, please commit an issue to https://github.com/Soulter/hugging-chat-api/issues")
-        return Assistant(**res['data'])
 
     def _stream_query(
         self,
         text: str,
-        web_search: bool = False,
         is_retry: bool = False,
         retry_count: int = 5,
         conversation: Conversation = None,
         message_id: str = None,
     ) -> typing.Generator[dict, None, None]:
+    
         if conversation is None:
             conversation = self.current_conversation
     
@@ -679,11 +489,10 @@ class ChatBot:
         req_json = {
             "id": message_id,
             "inputs": text,
-            "is_continue": False,
             "is_retry": is_retry,
-            "web_search": web_search,
-            "tools": []
         }
+
+        req_json = json.dumps(req_json)
         headers = {
             'authority': 'huggingface.co',
             'accept': '*/*',
@@ -710,13 +519,13 @@ class ChatBot:
     
             resp = self.session.post(
                 self.hf_base_url + f"/chat/conversation/{conversation}",
-                files={ "data": (None, json.dumps(req_json)) },
+                files={ "data": (None, req_json)},
                 stream=True,
                 headers=headers,
                 cookies=self.session.cookies.get_dict(),
             )
             resp.encoding = 'utf-8'
-    
+
             if resp.status_code != 200:
                 retry_count -= 1
                 if retry_count <= 0:
@@ -770,13 +579,6 @@ class ChatBot:
         # Update the history of current conversation
         self.get_conversation_info(conversation)
         yield obj
-
-    def query(self) -> Message:
-        """
-        **Deprecated**
-        Please use `chat()`. The function will raise an error immediately.
-        """
-        raise Exception("The function is deprecated. Please use `chat()`")
     
     def get_message_node(self, conversation: Conversation, message_id: str):
         for node in conversation.history:
@@ -787,9 +589,7 @@ class ChatBot:
     def chat(
         self,
         text: str,
-        web_search: bool = False,
-        # For stream mode, yield all responses from the server.
-        _stream_yield_all: bool = False,
+        _stream_yield_all: bool = True,
         retry_count: int = 5,
         conversation: Conversation = None,
         edit_user_node: MessageNode = None,
@@ -798,10 +598,6 @@ class ChatBot:
     ) -> Message:
         """
         - Send a message to the current conversation. Return a Message object.
-
-        - You can turn on the web search by set the parameter `web_search` to True.
-
-        - Stream is now the default mode, you can call Message.wait_until_done() to get the result text.
         
         - `Edit history`: pass `edit_user_node`. The history can be retrieved from `conversation.history`. 
 
@@ -826,14 +622,12 @@ class ChatBot:
         msg = Message(
             g=self._stream_query(
                 text=text,
-                web_search=web_search,
                 retry_count=retry_count,
                 conversation=conversation,
                 is_retry=is_retry,
                 message_id=edit_message_id
             ),
             _stream_yield_all=_stream_yield_all,
-            web_search=web_search,
             conversation=conversation
         )
         return msg
