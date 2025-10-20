@@ -39,7 +39,7 @@ class ChatBot:
         Returns a ChatBot object
         default_llm: name or index
         """
-        if cookies is None"":
+        if cookies is None:
             raise exceptions.ChatBotInitError(
                 "Authentication is required now, but no cookies provided. See tutorial at https://github.com/Soulter/hugging-chat-api"
             )
