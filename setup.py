@@ -3,15 +3,16 @@ from setuptools import setup
 
 setup(
     name="hugchat",
-    version="0.5.1",
+    version="0.5.2",
     description="A huggingchat python api.",
     long_description=open("README.md", "rt", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/Soulter/hugging-chat-api",
+    url="https://github.com/drimeF0/hugging-chat-api",
     project_urls={
-        "Bug Report": "https://github.com/Soulter/hugging-chat-api/issues"
+        "Original": "https://github.com/Soulter/hugging-chat-api/",
+        "Updated": "https://github.com/drimeF0/hugging-chat-api/"
     },
-    author="Soulter",
+    author="original: Soulter, updated: drimeF0",
     author_email="905617992@qq.com",
     license="GNU Affero General Public License v3.0",
     packages=find_namespace_packages("src"),
@@ -35,5 +36,6 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
 )
